@@ -18,7 +18,7 @@ var achievementFiles = []string{
 	"Achievements.ini",
 }
 
-var watcher *filewatcher.Watcher
+var watcher *filewatcher.FileWatcher
 var stopChan chan any
 var currentAchievements = make(map[string]map[string]parser.Achievement)
 
@@ -27,42 +27,40 @@ var apiKey string
 
 const maxNotifyAchievements = 2
 
-func FileEventHandler(event filewatcher.Event) {
-	fmt.Println("File event:", event.Type, event.Path)
-	if event.Info == nil || event.Info.IsDir() {
+func FileEventHandler(event filewatcher.EventType, path string) {
+	fmt.Println("File event:", event, path)
+	if path == "" {
 		return
 	}
 	if apiKey == "" {
 		fmt.Println("No API Key set, cannot fetch achievement info")
 		return
 	}
-	appId := helper.ExtractAppId(event.Path)
+	appId := helper.ExtractAppId(path)
 	if appId == "" {
-		fmt.Println("Could not extract appId from path:", event.Path)
+		fmt.Println("Could not extract appId from path:", path)
 		return
 	}
 
-	if event.Type == filewatcher.Add {
+	if event == filewatcher.FileCreated {
 		err := steam.CacheAchievements(apiKey, appId)
 		if err != nil {
 			fmt.Println("Error caching achievements:", err)
 		}
 	}
 
-	// read file and check for new achievements if you find 1 update currentAchievements and send notification
-	f, err := os.Open(event.Path)
+	f, err := os.Open(path)
 	if err != nil {
 		fmt.Println("Error opening file:", err)
 		return
 	}
 	defer f.Close()
-	achievements, err := parser.ParseFile(f, event.Path)
+	achievements, err := parser.ParseFile(f, path)
 	if err != nil {
 		fmt.Println("Error parsing file:", err)
 		return
 	}
 
-	//compare with currentAchievements
 	oldAchievements, exists := currentAchievements[appId]
 	if !exists {
 		oldAchievements = make(map[string]parser.Achievement)
@@ -90,7 +88,7 @@ func FileEventHandler(event filewatcher.Event) {
 						fmt.Println("Error fetching achievement icon:", err)
 					}
 				}
-				notifier.SendAchievement(achievementInfo.Name, achievementInfo.Description, icon)
+				notifier.SendAchievement(achievementInfo.DisplayName, achievementInfo.Description, icon)
 			} else {
 				fmt.Println("Error fetching achievement info:", err)
 			}
@@ -156,17 +154,25 @@ func StartWatcher() error {
 		return err
 	}
 	var err error
-	watcher, err = filewatcher.NewWatcher(filewatcher.Options{
-		Recursive:     true,
-		IgnoreInitial: true,
-		Whitelist:     achievementFiles,
-	})
+	watcher, err = filewatcher.New()
 	if err != nil {
+		fmt.Println("Error creating file watcher:", err)
 		return err
 	}
 
-	watcher.On(filewatcher.Add, FileEventHandler)
-	watcher.On(filewatcher.Change, FileEventHandler)
+	watcher.SetHandler(FileEventHandler)
+
+	for _, folder := range folders {
+		if _, err := os.Stat(folder); os.IsNotExist(err) {
+			fmt.Println("Folder does not exist, skipping:", folder)
+			continue
+		}
+		if err := watcher.Add(folder); err != nil {
+			fmt.Println("Error adding folder to watcher:", err)
+		}
+	}
+
+	watcher.Start()
 
 	stopChan = make(chan any)
 	go func() {

@@ -1,4 +1,3 @@
-// Package toast provides Windows toast notification functionality using PowerShell.
 package toast
 
 import (

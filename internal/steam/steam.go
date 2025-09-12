@@ -83,7 +83,6 @@ func CacheAchievements(apikey string, appid string) error {
 		return err
 	}
 
-	//get the data from the url and save it to cacheFilePath
 	resp, err := http.Get(url)
 	if err != nil {
 		fmt.Println("Error fetching data from API:", err)

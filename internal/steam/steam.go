@@ -29,18 +29,17 @@ func isOlderThanMonths(filepath string, months int) (bool, error) {
 }
 
 type Achievement struct {
-	Name         string `json:"name"`
-	DisplayName  string `json:"displayName"`
-	Description  string `json:"description,omitempty"`
-	Icon         string `json:"icon"`
-	IconGray     string `json:"icongray"`
-	Hidden       int    `json:"hidden"`
-	DefaultValue int    `json:"defaultvalue"`
+	ApiName     string `json:"internal_name"`
+	DisplayName string `json:"localized_name"`
+	Description string `json:"localized_desc,omitempty"`
+	Icon        string `json:"icon,omitempty"`
+	IconGray    string `json:"icon_gray,omitempty"`
+	Hidden      bool   `json:"hidden"`
+	Rarity      string `json:"player_percent_unlocked,omitempty"`
 }
 
 type AchievementsData struct {
 	AppID        string        `json:"appid"`
-	Name         string        `json:"name"`
 	Achievements []Achievement `json:"achievements"`
 }
 
@@ -75,7 +74,7 @@ func CacheAchievements(apikey string, appid string) error {
 
 	}
 
-	url := "https://api.steampowered.com/ISteamUserStats/GetSchemaForGame/v2/?key=" + apikey + "&appid=" + appid
+	url := "https://api.steampowered.com/IPlayerService/GetGameAchievements/v1/?language=english&key=" + apikey + "&appid=" + appid
 	// fmt.Println("Fetching achievements from URL:", url)
 
 	if err := os.MkdirAll(filepath.Dir(cacheFilePath), 0755); err != nil {
@@ -96,12 +95,9 @@ func CacheAchievements(apikey string, appid string) error {
 	}
 
 	var apiResponse struct {
-		Game struct {
-			GameName           string `json:"gameName"`
-			AvailableGameStats struct {
-				Achievements []Achievement `json:"achievements"`
-			} `json:"availableGameStats"`
-		} `json:"game"`
+		Response struct {
+			Achievements []Achievement `json:"achievements"`
+		} `json:"response"`
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&apiResponse); err != nil {
@@ -109,10 +105,18 @@ func CacheAchievements(apikey string, appid string) error {
 		return err
 	}
 
+	for i := range apiResponse.Response.Achievements {
+		if apiResponse.Response.Achievements[i].Icon != "" {
+			apiResponse.Response.Achievements[i].Icon = fmt.Sprintf("https://steamcdn-a.akamaihd.net/steamcommunity/public/images/apps/%s/%s", appid, apiResponse.Response.Achievements[i].Icon)
+		}
+		if apiResponse.Response.Achievements[i].IconGray != "" {
+			apiResponse.Response.Achievements[i].IconGray = fmt.Sprintf("https://steamcdn-a.akamaihd.net/steamcommunity/public/images/apps/%s/%s", appid, apiResponse.Response.Achievements[i].IconGray)
+		}
+	}
+
 	achievementsData := AchievementsData{
 		AppID:        appid,
-		Name:         apiResponse.Game.GameName,
-		Achievements: apiResponse.Game.AvailableGameStats.Achievements,
+		Achievements: apiResponse.Response.Achievements,
 	}
 
 	file, err := os.Create(cacheFilePath)
@@ -150,7 +154,7 @@ func GetAchievement(appid string, achievementName string, apikey string) (*Achie
 	}
 
 	for _, achievement := range achievementsData.Achievements {
-		if achievement.Name == achievementName {
+		if achievement.ApiName == achievementName {
 			return &achievement, nil
 		}
 	}
@@ -175,7 +179,6 @@ func GetImage(appid string, imageURL string) (string, error) {
 		}
 	}
 
-	// Download the image and save it to the cache
 	resp, err := http.Get(imageURL)
 	if err != nil {
 		return "", err
